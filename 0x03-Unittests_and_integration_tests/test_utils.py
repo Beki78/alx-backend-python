@@ -91,4 +91,5 @@ class TestMemoize(unittest.TestCase):
             test.a_property()
             test.a_property()
             mock_object.assert_called_once()
-            
+
+# Add a newline at the end of the file
