@@ -110,4 +110,3 @@ class TestIntegrationGithubOrgClient(unittest.TestCase):
         """method called after tests in an individual class have run"""
         cls.get_patcher.stop()
 
-# Add a newline at the end of the file
