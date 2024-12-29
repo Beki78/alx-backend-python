@@ -1,91 +1,102 @@
-from rest_framework import serializers
 from .models import User, Conversation, Message
+from rest_framework import serializers
+from django.utils.timezone import now
 
-class UserSerializer(serializers.ModelSerializer):
-    """Serializer for the User model."""
-
-    confirm_password = serializers.CharField(write_only=True)
+class UserSerializer(serializers.HyperlinkedModelSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name="user-detail")
+    member_since = serializers.SerializerMethodField()
+    full_name = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = '__all__'
-        extra_kwargs = {
-            'password': {'write_only': True},
-            'email': {'required': True},
-            'first_name': {'required': True},
-            'last_name': {'required': True},
-        }
+        fields = ['url', 'user_id', 'full_name', 'first_name', 'last_name', 'email', 'phone_number', 'role', 'member_since', 'created_at']
+        read_only_fields = ['user_id', 'member_since', 'created_at']
 
-    def validate(self, attrs):
-        """
-        Ensure password and confirm_password match.
-        """
-        password = attrs.get('password')
-        confirm_password = attrs.pop('confirm_password', None)
-        if password != confirm_password:
-            raise serializers.ValidationError({"password": "Passwords do not match."})
-        return attrs
+    def get_member_since(self, obj):
+        return (now() - obj.created_at).days
+    
+    def get_full_name(self, obj):
+        return f"{obj.first_name} {obj.last_name}"
 
-    def create(self, validated_data):
-        """
-        Overriding the create method to hash the password.
-        """
-        password = validated_data.pop('password')
-        groups = validated_data.pop('groups', [])
-        user_permissions = validated_data.pop('user_permissions', [])
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exclude(pk=self.instance.pk if self.instance else None).exists():
+            raise serializers.ValidationError("This email is already in use.")
+        return value
 
-        # Use the create_user method to ensure password hashing
-        user = User.objects.create_user(
-            username=validated_data.get('username'),
-            email=validated_data.get('email'),
-            password=validated_data.get('password'),
-            first_name=validated_data.get('first_name'),
-            last_name=validated_data.get('last_name'),
-            phone_number=validated_data.get('phone_number'),
-        )
-        
-        user.set_password(password)  # Hash the password explicitly
-        user.save()
-
-        user.groups.set(groups)
-        user.user_permissions.set(user_permissions)
-
-        return user
-
-    def update(self, instance, validated_data):
-        """
-        Overriding the update method to handle password hashing.
-        """
-        password = validated_data.pop('password', None)
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-
-        if password:
-            instance.set_password(password)
-
-        instance.save()
-        return instance
+    def validate_phone_number(self, value):
+        allowed_chars = ['+', ' ', '(', ')', '-']
+        if value and all([char.isdigit() or char in allowed_chars for char in value]):
+            raise serializers.ValidationError("Phone number can only contain digits.")
 
 
-class MessageSerializer(serializers.ModelSerializer):
-    """Serializer for the Message model."""
-    fullname = serializers.SerializerMethodField()
+class MessageSerializer(serializers.HyperlinkedModelSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name="message-detail")
+    sender = UserSerializer()
+    conversation_title = serializers.CharField(source='conversation.title', read_only=True)
+    sent_since = serializers.SerializerMethodField()
+    read_since = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
-        fields = '__all__'
+        fields = ['url', 'message_id', 'message_body', 'sender', 'conversation_title', 'sent_at', 'read_at', 'sent_since', 'read_since']
+        read_only_fields = ['message_id', 'sent_at', 'read_at', 'sent_since', 'read_since']
 
-    def get_fullname(self, obj):
-        """
-        Retrieve the full name of the message sender.
-        """
-        return f"{obj.sender.first_name} {obj.sender.last_name}"
+    def get_sent_since(self, obj):
+        return (now() - obj.sent_at).seconds
+    
+    def get_read_since(self, obj):
+        if obj.read_at:
+            return (obj.read_at - obj.sent_at).seconds
+        return None
+    
+    def validate_message_body(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Message body cannot be empty.")
+        if len(value) > 500:
+            raise serializers.ValidationError("Message body is too long.")
+        return value
 
-
-class ConversationSerializer(serializers.ModelSerializer):
-    """Serializer for the Conversation model."""
+class ConversationSerializer(serializers.HyperlinkedModelSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name="conversation-detail")
+    participants = serializers.SerializerMethodField()
     messages = MessageSerializer(many=True, read_only=True)
+    created_since = serializers.SerializerMethodField()
 
     class Meta:
         model = Conversation
-        fields = '__all__'
+        fields = ['url', 'conversation_id', 'title', 'participants', 'created_since', 'created_at', 'messages']
+        read_only_fields = ['conversation_id', 'created_since', 'created_at', 'messages']
+    
+    def get_participants(self, obj):
+        participants = obj.participants.all()
+        context = self.context
+        return UserSerializer(participants, many=True, context=context).data
+
+    def get_created_since(self, obj):
+        return (now() - obj.created_at).days
+
+    def validate_title(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Title can't be empty.")
+        if len(value) > 255:
+            raise serializers.ValidationError("Title is too long.")
+        return value
+    
+    def validate(self, data):
+        if 'participants' in self.initial_data and len(self.initial_data['participants']) < 2:
+            raise serializers.ValidationError("A conversation must have at least 2 participants.")
+        return data
+
+    def create(self, validated_data):
+        participants_data = self.initial_data.pop('participants', [])
+        conversation = Conversation.objects.create(**validated_data)
+        for participant_data in participants_data:
+            user = User.objects.get(user_id=participant_data['user_id'])
+            conversation.participants.add(user)
+        return conversation
+
+class NestedUserSerializer(serializers.ModelSerializer):
+    """For POST requests where only `user_id` is needed."""
+    class Meta:
+        model = User
+        fields = ['user_id']

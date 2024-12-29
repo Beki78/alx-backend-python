@@ -1,122 +1,96 @@
-from rest_framework import viewsets, status
-from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
-from .models import Conversation, Message, User
-from .serializers import ConversationSerializer, MessageSerializer, UserSerializer
+from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
-from django_filters.rest_framework import DjangoFilterBackend
-from .permissions import IsConversationParticipant, IsMessageSender
-from rest_framework.permissions import IsAuthenticated
-from rest_framework import filters
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.response import Response
+from .models import User, Message, Conversation
+from .serializers import UserSerializer, MessageSerializer, ConversationSerializer
 
 
-
-class UserCreateView(viewsets.ModelViewSet):
-    queryset = User.objects.all()
+class UserViewSet(viewsets.ModelViewSet):
+    queryset = User.objects.all().order_by('-created_at')
     serializer_class = UserSerializer
-
-
-class ConversationViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for listing, creating, and managing conversations.
-    """
-    queryset = Conversation.objects.all()
-    serializer_class = ConversationSerializer
-    permission_classes = [IsAuthenticated, IsConversationParticipant]
-
-    def create(self, request):
-        """
-        Custom endpoint to create a new conversation.
-        Accepts a list of participant IDs in the request body.
-        """
-        participant_ids = request.data.get('participants', [])
-        if not participant_ids or len(participant_ids) < 2:
-            return Response(
-                {"error": "At least two participants are required to create a conversation."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        participants = User.objects.filter(user_id__in=participant_ids)
-        if participants.count() != len(participant_ids):
-            return Response(
-                {"error": "Some participants could not be found."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        conversation = Conversation.objects.create()
-        conversation.participants.set(participants)
-        conversation.save()
-
-        serializer = self.get_serializer(conversation)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    permission_classes = [permissions.IsAuthenticated]
 
 
 class MessageViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for listing, creating, and managing messages.
-    """
+    queryset = Message.objects.all().order_by('conversation', '-sent_at')
     serializer_class = MessageSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    permission_classes = [IsAuthenticated, IsMessageSender]
 
-    filterset_fields = ['conversation', 'sender']
-    search_fields = ['message_body']
-    ordering_fields = ['created_at', 'sender']
+    @action(methods=['get'], detail=False)
+    def get_all(self, request):
+        messages = Message.objects.all().order_by('-sent_at')
+        serializer = MessageSerializer(messages, many=True)
 
-    def get_queryset(self):
-        """
-        Filter messages by conversation ID from the nested URL.
-        """
-        conversation_id = self.kwargs.get('conversation_pk')  # NestedDefaultRouter provides 'conversation_pk'
-        if conversation_id:
-            return Message.objects.filter(conversation__conversation_id=conversation_id)
-        return Message.objects.all()
+        return Response(serializer.data)
+    
+    @action(methods=['get'], detail=True)
+    def get_conversation(self, request, pk=None):
+        conversation = Conversation.objects.filter(pk=pk).first()
+        if not conversation:
+            return Response({'Error': 'Conversation not exists.'}, status=404)
+        
+        messages = Message.objects.filter(conversation=conversation).order_by('-sent_at')
+        serializer = MessageSerializer(messages, many=True)
 
-    def create(self, request, *args, **kwargs):
-        """
-        Custom endpoint to send a message to an existing conversation.
-        """
-        conversation_id = kwargs.get('conversation_pk')
-        conversation = get_object_or_404(Conversation, conversation_id=conversation_id)
+        return Response(serializer.data)
+
+    @action(methods=['POST'], detail=False)
+    def _create(self, request):
         sender_id = request.data.get('sender')
+        conversation_id = request.data.get('conversation')
         message_body = request.data.get('message_body')
 
-        if not (sender_id and message_body):
-            return Response(
-                {"error": "Sender and message_body are required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if not all([sender_id, conversation_id, message_body]):
+            return Response({'Error': 'All fields are required.'}, status=400)
+        
+        sender = User.objects.filter(pk=sender_id).first()
+        conversation = Conversation.objects.filter(pk=conversation_id).first()
+        if not all([sender, conversation]):
+            return Response({'Error': 'Sender or conversation not exists.'}, status=404)
+        
+        message = Message.objects.create(sender=sender, conversation=conversation, message_body=message_body)
+        dto = self.get_serializer(message).data
 
-        sender = get_object_or_404(User, user_id=sender_id)
-        message = Message.objects.create(
-            conversation=conversation,
-            sender=sender,
-            message_body=message_body
-        )
-        serializer = self.get_serializer(message)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(dto, status=201)
 
-    @action(detail=False, methods=['get'], url_path='messages-by-user')
-    def messages_by_user(self, request, *args, **kwargs):
+
+class ConversationViewSet(viewsets.ModelViewSet):
+    queryset = Conversation.objects.all().order_by('-created_at')
+    serializer_class = ConversationSerializer
+
+    def get_serializer_context(self):
         """
-        Custom endpoint to fetch all messages sent by a specific user within a specific conversation.
-        Accepts `user_id` in the query parameters.
+        Include the request in the context for serializers.
         """
-        conversation_pk = kwargs.get('conversation_pk')  # Get conversation ID from nested URL
-        user_id = request.query_params.get('user_id')
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
 
-        if not user_id:
-            return Response(
-                {"error": "user_id is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+    @action(methods=['get'], detail=False)
+    def get_all(self, request):
+        conversations = Conversation.objects.all().order_by('-created_at')
+        serializer = ConversationSerializer(conversations, many=True)
 
-        # Validate conversation existence
-        conversation = get_object_or_404(Conversation, conversation_id=conversation_pk)
-        user = get_object_or_404(User, user_id=user_id)
+        return Response(serializer.data)
 
-        # Filter messages by both conversation and sender
-        messages = Message.objects.filter(conversation=conversation, sender=user)
+    @action(methods=['POST'], detail=False)
+    def _create(self, request):
+        participants_ids = request.data.get('participants', [])
 
-        serializer = MessageSerializer(messages, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        filters = {
+            'participants': participants_ids,
+        }
+
+        if not filters['participants']:
+            return Response({'Error': 'This field is required.'}, status=400)
+        if not participants_ids or len(participants_ids) < 2:
+            return Response({'Error': 'At least 2 participants are required.'}, status=400)
+        
+        participants = User.objects.filter(pk__in=participants_ids)
+        if len(participants) != len(participants_ids):
+            return Response({'Error': 'Some or all users not exists'}, status=404)
+        
+        conversation = Conversation.objects.create(title=request.data.get('title'))
+        conversation.participants.set(participants)
+        dto = self.get_serializer(conversation).data
+
+        return Response(dto, status=201)
