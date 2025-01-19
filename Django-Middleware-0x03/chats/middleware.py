@@ -45,6 +45,25 @@ class RestrictAccessByTimeMiddleware:
         response = self.get_response(request)
         return response
     
+class OffensiveLanguageMiddleware:
+    message_count = defaultdict(list)
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if request.method == 'POST':
+            ip = request.META['REMOTE_ADDR']
+            current_time = time.time()
+            self.message_count[ip] = [t for t in self.message_count[ip] if current_time - t < 60]
+
+            if len(self.message_count[ip]) >= 5:
+                return HttpResponseForbidden("403 Forbidden: Too many messages sent.")
+            self.message_count[ip].append(current_time)
+
+        response = self.get_response(request)
+        return response
+    
 class RolepermissionMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
