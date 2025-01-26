@@ -1,50 +1,68 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: django-messaging-app
+  name: django-messaging-blue
+  labels:
+    app: django-messaging
+    version: blue
 spec:
-  replicas: 1  # Number of replicas
+  replicas: 3
   selector:
     matchLabels:
-      app: django-messaging-app
+      app: django-messaging
+      version: blue
   template:
     metadata:
       labels:
-        app: django-messaging-app
+        app: django-messaging
+        version: blue
     spec:
       containers:
-      - name: django-messaging-app
-        image: your_dockerhub_username/messaging_app:latest  # Replace with your image name
-        ports:
-        - containerPort: 8000
-        env:
-        - name: MYSQL_HOST
-          value: db  # Adjust to match your setup
-        - name: MYSQL_USER
-          valueFrom:
-            secretKeyRef:
-              name: db-secret
-              key: MYSQL_USER
-        - name: MYSQL_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: db-secret
-              key: MYSQL_PASSWORD
-        - name: MYSQL_DB
-          valueFrom:
-            secretKeyRef:
-              name: db-secret
-              key: MYSQL_DB
+        - image: drplain004/messaging-app:v2.0.0
+          name: django-messaging-blue
+          envFrom:
+            - secretRef:
+                name: mysql-secrets
+          ports:
+            - containerPort: 8000
 
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  labels:
+    app: mysql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql # Use the appropriate MySQL version
+          ports:
+            - containerPort: 3306
+          envFrom:
+            - secretRef:
+                name: mysql-secrets
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: django-messaging-app-service
+  name: mysql-service
+  labels:
+    app: mysql
 spec:
   type: ClusterIP
   selector:
-    app: django-messaging-app
+    app: mysql
   ports:
-    - port: 8000
-      targetPort: 8000
+    - protocol: TCP
+      port: 3306
+      targetPort: 3306
