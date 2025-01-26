@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# Deploy Blue Version
+kubectl apply -f messaging_app/blue_deployment.yaml
+
+# Deploy Green Version
+kubectl apply -f messaging_app/green_deployment.yaml
+
+# Create the Service
+kubectl apply -f messaging_app/kubeservice.yaml
+
+# Check logs for the Green Deployment
+kubectl logs -l app=django-app,version=green --tail=20
