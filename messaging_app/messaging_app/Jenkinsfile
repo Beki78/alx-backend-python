@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        GIT_CREDENTIALS = credentials('github-credentials') 
+        GIT_CREDENTIALS = credentials('github-credentials') // Replace with your credentials ID
     }
 
     stages {
@@ -14,15 +14,18 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 script {
-                    def pyEnv = new PythonEnv('python3') 
+                    // Use ShiningPanda to set up a Python virtual environment
+                    def pyEnv = new PythonEnv('python3') // Adjust this based on your setup
                     pyEnv.setup()
-                    sh 'pip install -r messaging_app/requirements.txt'
+                    // Install dependencies with pip3
+                    sh 'pip3 install -r messaging_app/requirements.txt'
                 }
             }
         }
         stage('Run Tests') {
             steps {
                 script {
+                    // Run tests using pytest and generate a report
                     sh 'pytest messaging_app/tests > test_report.txt; tail -n 10 test_report.txt'
                 }
             }
@@ -30,6 +33,7 @@ pipeline {
         stage('Generate Report') {
             steps {
                 script {
+                    // Archive the test report
                     archiveArtifacts artifacts: 'test_report.txt', fingerprint: true
                 }
             }
