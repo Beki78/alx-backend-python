@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: django-messaging-app
+spec:
+  replicas: 1  # Number of replicas
+  selector:
+    matchLabels:
+      app: django-messaging-app
+  template:
+    metadata:
+      labels:
+        app: django-messaging-app
+    spec:
+      containers:
+      - name: django-messaging-app
+        image: your_dockerhub_username/messaging_app:latest  # Replace with your image name
+        ports:
+        - containerPort: 8000
+        env:
+        - name: MYSQL_HOST
+          value: db  # Adjust to match your setup
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: MYSQL_USER
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: MYSQL_PASSWORD
+        - name: MYSQL_DB
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: MYSQL_DB
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: django-messaging-app-service
+spec:
+  type: ClusterIP
+  selector:
+    app: django-messaging-app
+  ports:
+    - port: 8000
+      targetPort: 8000
