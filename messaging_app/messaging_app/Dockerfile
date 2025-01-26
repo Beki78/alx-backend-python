@@ -1,12 +1,14 @@
 FROM python:3.10
 
-WORKDIR /messaging_app
+RUN mkdir -p /app
+
+WORKDIR /app
 
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY . /app/
 
 RUN python manage.py collectstatic --noinput
 
