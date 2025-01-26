@@ -1,5 +1,5 @@
-# Enable Nginx Ingress controller in Minikube
-minikube addons enable ingress
+# Install the Nginx Ingress controller
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.1/deploy/static/provider/cloud/deploy.yaml
 
 # Apply the Ingress resource
-kubectl apply -f messaging_app/ingress.yaml
+kubectl apply -f ingress.yaml
