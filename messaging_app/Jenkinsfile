@@ -1,0 +1,44 @@
+pipeline {
+    agent any
+
+    environment {
+        GIT_CREDENTIALS = credentials('github-credentials') 
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git url: 'https://github.com/yourusername/alx-backend-python.git', credentialsId: 'github-credentials'
+            }
+        }
+        stage('Install Dependencies') {
+            steps {
+                script {
+                    def pyEnv = new PythonEnv('python3') 
+                    pyEnv.setup()
+                    sh 'pip install -r messaging_app/requirements.txt'
+                }
+            }
+        }
+        stage('Run Tests') {
+            steps {
+                script {
+                    sh 'pytest messaging_app/tests > test_report.txt; tail -n 10 test_report.txt'
+                }
+            }
+        }
+        stage('Generate Report') {
+            steps {
+                script {
+                    archiveArtifacts artifacts: 'test_report.txt', fingerprint: true
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning up...'
+        }
+    }
+}
